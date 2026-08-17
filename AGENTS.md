@@ -30,6 +30,7 @@
 - 不得在建议尚未成功 inflate 时隐藏原候选栏，也不得在恢复时遗留空槽位、Surface 或修改后的 visibility。
 - `restarting=true` 的 `onStartInputView` 不代表新输入目标，不应清空仍有效的建议。
 - 保持 Adaptive Icon 的前景、背景及 Android 13+ monochrome 分层。
+- `versionName` 按发布版本维护；`versionCode` 必须继续使用当前 Git 提交数，不得改回手工常量。
 - Release 签名沿用 `keystore.properties` 或 CI 环境变量配置；不得硬编码、复制或提交密钥与密码。
 - 不提交 APK、构建产物、日志、反编译文件或 `local.properties`。
 
