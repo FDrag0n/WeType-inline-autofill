@@ -2,6 +2,13 @@ plugins {
     id "com.android.application"
 }
 
+def gitCommitCount = providers.exec {
+    workingDir rootProject.projectDir
+    commandLine "git", "rev-list", "--count", "HEAD"
+}.standardOutput.asText.map { it.trim() }
+
+def gitVersionCode = gitCommitCount.map { Integer.parseInt(it) }
+
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file("keystore.properties")
 if (keystorePropertiesFile.isFile()) {
@@ -37,8 +44,8 @@ android {
         applicationId "dev.sawako.wetypeinlineautofill"
         minSdk 30
         targetSdk 36
-        versionCode 1
-        versionName "0.1.0"
+        versionCode gitVersionCode.get()
+        versionName "0.2.0"
     }
 
     signingConfigs {
