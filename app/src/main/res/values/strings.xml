@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">WeType Inline Autofill</string>
+    <string name="module_description">Adds inline autofill suggestions to WeType.</string>
+</resources>
