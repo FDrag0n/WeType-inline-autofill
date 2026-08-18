@@ -268,7 +268,7 @@ final class InlineSuggestionsUi {
                          boolean scrollable) {
         try {
             suggestion.inflate(service,
-                    new Size(target.contentWidth(scrollable), target.contentHeight()),
+                    new Size(target.contentWidth(scrollable), target.contentHeight),
                     service.getMainExecutor(), view -> {
                         if (view == null) {
                             Log.w(TAG, "Inline suggestion renderer returned no view");
@@ -290,9 +290,9 @@ final class InlineSuggestionsUi {
                         if (!scrollable) {
                             params.width = ViewGroup.LayoutParams.MATCH_PARENT;
                         }
-                        params.height = target.contentHeight();
+                        params.height = target.contentHeight;
                         params.gravity = scrollable ? Gravity.CENTER_VERTICAL : Gravity.CENTER;
-                        params.topMargin = target.contentOffset();
+                        params.topMargin = target.contentOffset;
                         container.addView(view, params);
                         if (!candidatesActive) {
                             target.showReadyContent();
@@ -312,9 +312,11 @@ final class InlineSuggestionsUi {
                 }
                 SurfaceControl parent = target.scrollSurface.getSurfaceControl();
                 if (parent != null && parent.isValid()) {
-                    SurfaceControl.Transaction transaction = new SurfaceControl.Transaction();
-                    setSurfaceCrop(transaction, target.scrollSurface, parent);
-                    transaction.reparent(surfaceControl, parent).apply();
+                    try (SurfaceControl.Transaction transaction =
+                                 new SurfaceControl.Transaction()) {
+                        setSurfaceCrop(transaction, target.scrollSurface, parent);
+                        transaction.reparent(surfaceControl, parent).apply();
+                    }
                 }
             }
 
@@ -329,9 +331,10 @@ final class InlineSuggestionsUi {
         if (surface == null || !surface.isValid()) {
             return;
         }
-        SurfaceControl.Transaction transaction = new SurfaceControl.Transaction();
-        setSurfaceCrop(transaction, view, surface);
-        transaction.apply();
+        try (SurfaceControl.Transaction transaction = new SurfaceControl.Transaction()) {
+            setSurfaceCrop(transaction, view, surface);
+            transaction.apply();
+        }
     }
 
     @SuppressWarnings("deprecation")
@@ -355,10 +358,15 @@ final class InlineSuggestionsUi {
 
     private void clearContent(State target) {
         target.generation++;
-        for (InlineContentView view : target.scrollViews) {
-            SurfaceControl surface = view.getSurfaceControl();
-            if (surface != null && surface.isValid()) {
-                new SurfaceControl.Transaction().reparent(surface, null).apply();
+        if (!target.scrollViews.isEmpty()) {
+            try (SurfaceControl.Transaction transaction = new SurfaceControl.Transaction()) {
+                for (InlineContentView view : target.scrollViews) {
+                    SurfaceControl surface = view.getSurfaceControl();
+                    if (surface != null && surface.isValid()) {
+                        transaction.reparent(surface, null);
+                    }
+                }
+                transaction.apply();
             }
         }
         target.scrollViews.clear();
@@ -562,19 +570,11 @@ final class InlineSuggestionsUi {
             showing = false;
         }
 
-        int contentHeight() {
-            return contentHeight;
-        }
-
         int contentWidth(boolean scrollable) {
             if (scrollable || !nativeShell) {
                 return ViewGroup.LayoutParams.WRAP_CONTENT;
             }
             return pinnedWidth;
-        }
-
-        int contentOffset() {
-            return contentOffset;
         }
     }
 }
