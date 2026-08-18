@@ -30,4 +30,11 @@ public class InlineSuggestionsUiTest {
         assertTrue(InlineSuggestionsUi.hasReadyContent(true, false));
         assertTrue(InlineSuggestionsUi.hasReadyContent(false, true));
     }
+
+    @Test
+    public void followsCandidateListReplacementWithoutDroppingIncrementalState() {
+        assertTrue(InlineSuggestionsUi.candidateActiveAfterUpdate(false, true, true));
+        assertTrue(InlineSuggestionsUi.candidateActiveAfterUpdate(true, false, false));
+        assertFalse(InlineSuggestionsUi.candidateActiveAfterUpdate(true, true, false));
+    }
 }

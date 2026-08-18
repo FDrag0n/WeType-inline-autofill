@@ -18,7 +18,7 @@
 3. 请求使用 AndroidX Autofill v1 样式；响应异步 inflate，首个 pinned 建议占用右侧槽位，其余建议放入横向滚动区。
 4. UI 优先复用 `ImeCandidateView` 的原生尺寸、背景和右侧宽度；结构不匹配时才回退到候选栏同级容器。
 5. 可滚动 `InlineContentView` 的 SurfaceControl reparent 到裁剪后的 SurfaceView，以避免建议越过右侧图标。
-6. generation 标记丢弃过期异步回调；只有至少一个建议渲染完成后才显示外壳，清空、切换输入框、detach 和热重载时恢复原候选栏。
+6. generation 标记丢弃过期异步回调；只有至少一个建议渲染完成后才显示外壳。原生候选非空时暂停整条 Inline UI，候选清空后恢复；空响应、切换输入框、detach 和热重载时彻底清理并恢复原候选栏。
 7. 热重载前在主线程拆除 UI，重载后按稳定 Hook ID 调用 `replaceHook()`。
 
 ## 约束

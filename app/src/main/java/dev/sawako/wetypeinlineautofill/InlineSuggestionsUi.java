@@ -35,12 +35,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 final class InlineSuggestionsUi {
-    private static final String CANDIDATE_CLASS =
+    static final String CANDIDATE_CLASS =
             "com.tencent.wetype.plugin.hld.candidate.ImeCandidateView";
     private static final String TAG = "WeTypeInlineAutofill";
     private static final int HEIGHT_DP = 40;
 
     private State state;
+    private boolean candidatesActive;
 
     boolean show(InputMethodService service, InlineSuggestionsResponse response) {
         List<InlineSuggestion> suggestions = response.getInlineSuggestions();
@@ -84,6 +85,29 @@ final class InlineSuggestionsUi {
         clearContent(state);
         if (state.showing) {
             state.restoreShell();
+        }
+    }
+
+    void clearForNewInput(InputMethodService service) {
+        candidatesActive = false;
+        clear(service);
+    }
+
+    void updateCandidates(boolean newList, boolean hasCandidates) {
+        boolean active = candidateActiveAfterUpdate(candidatesActive, newList, hasCandidates);
+        if (active == candidatesActive) {
+            return;
+        }
+        candidatesActive = active;
+        if (state == null) {
+            return;
+        }
+        if (active) {
+            if (state.showing) {
+                state.restoreShell();
+            }
+        } else {
+            state.showReadyContent();
         }
     }
 
@@ -270,7 +294,9 @@ final class InlineSuggestionsUi {
                         params.gravity = scrollable ? Gravity.CENTER_VERTICAL : Gravity.CENTER;
                         params.topMargin = target.contentOffset();
                         container.addView(view, params);
-                        target.showReadyContent();
+                        if (!candidatesActive) {
+                            target.showReadyContent();
+                        }
                     });
         } catch (Throwable throwable) {
             Log.e(TAG, "Unable to inflate inline suggestion", throwable);
@@ -457,6 +483,11 @@ final class InlineSuggestionsUi {
 
     static boolean hasReadyContent(boolean scrollable, boolean pinned) {
         return scrollable || pinned;
+    }
+
+    static boolean candidateActiveAfterUpdate(boolean active, boolean newList,
+                                              boolean hasCandidates) {
+        return hasCandidates || (active && !newList);
     }
 
     private static int dp(Context context, int value) {

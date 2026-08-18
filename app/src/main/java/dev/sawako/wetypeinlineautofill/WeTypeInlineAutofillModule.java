@@ -22,6 +22,7 @@ import androidx.autofill.inline.common.ViewStyle;
 import androidx.autofill.inline.v1.InlineSuggestionUi;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Collections;
 
 import io.github.libxposed.api.XposedInterface;
@@ -38,10 +39,12 @@ public final class WeTypeInlineAutofillModule extends XposedModule {
     private static final String ID_REQUEST = "wetype_inline_request";
     private static final String ID_RESPONSE = "wetype_inline_response";
     private static final String ID_START_INPUT = "wetype_inline_start_input";
+    private static final String ID_CANDIDATES = "wetype_inline_candidates";
 
     private String processName;
     private boolean systemHookInstalled;
     private boolean imeHooksInstalled;
+    private boolean candidateHookInstalled;
     private InlineSuggestionsUi inlineUi;
 
     @Override
@@ -87,6 +90,7 @@ public final class WeTypeInlineAutofillModule extends XposedModule {
             hook(response).setId(ID_RESPONSE).intercept(this::interceptResponse);
             hook(startInput).setId(ID_START_INPUT).intercept(this::interceptStartInput);
             imeHooksInstalled = true;
+            installCandidateHook(param.getDefaultClassLoader());
             log(Log.INFO, TAG, "Installed WeType IME hooks");
         } catch (Throwable throwable) {
             log(Log.ERROR, TAG, "Unable to install WeType IME hooks", throwable);
@@ -114,6 +118,9 @@ public final class WeTypeInlineAutofillModule extends XposedModule {
             }
             try {
                 oldHandle.replaceHook(replacement);
+                if (ID_CANDIDATES.equals(oldHandle.getId())) {
+                    candidateHookInstalled = true;
+                }
                 replaced++;
             } catch (Throwable throwable) {
                 log(Log.ERROR, TAG, "Unable to replace hook " + oldHandle.getId(), throwable);
@@ -134,6 +141,9 @@ public final class WeTypeInlineAutofillModule extends XposedModule {
         }
         if (ID_START_INPUT.equals(id)) {
             return this::interceptStartInput;
+        }
+        if (ID_CANDIDATES.equals(id)) {
+            return this::interceptCandidates;
         }
         return null;
     }
@@ -161,6 +171,7 @@ public final class WeTypeInlineAutofillModule extends XposedModule {
             return chain.proceed();
         }
         InputMethodService service = (InputMethodService) chain.getThisObject();
+        installCandidateHook(service.getClass().getClassLoader());
         InlineSuggestionsResponse response = (InlineSuggestionsResponse) chain.getArg(0);
         return ui().show(service, response) ? true : chain.proceed();
     }
@@ -169,9 +180,36 @@ public final class WeTypeInlineAutofillModule extends XposedModule {
         boolean restarting = (boolean) chain.getArg(1);
         if (chain.getThisObject() instanceof InputMethodService
                 && InlineSuggestionsUi.shouldClearOnStartInputView(restarting)) {
-            ui().clear((InputMethodService) chain.getThisObject());
+            ui().clearForNewInput((InputMethodService) chain.getThisObject());
         }
         return chain.proceed();
+    }
+
+    private Object interceptCandidates(XposedInterface.Chain chain) throws Throwable {
+        Object candidates = chain.getArg(0);
+        boolean newList = (boolean) chain.getArg(2);
+        Object result = chain.proceed();
+        if (candidates instanceof ArrayList) {
+            ui().updateCandidates(newList, !((ArrayList<?>) candidates).isEmpty());
+        }
+        return result;
+    }
+
+    private void installCandidateHook(ClassLoader loader) {
+        if (candidateHookInstalled) {
+            return;
+        }
+        try {
+            Class<?> candidateClass = Class.forName(
+                    InlineSuggestionsUi.CANDIDATE_CLASS, false, loader);
+            Method update = candidateClass.getDeclaredMethod(
+                    "w", ArrayList.class, int.class, boolean.class, boolean.class);
+            hook(update).setId(ID_CANDIDATES).intercept(this::interceptCandidates);
+            candidateHookInstalled = true;
+            log(Log.INFO, TAG, "Installed WeType candidate-state hook");
+        } catch (Throwable throwable) {
+            log(Log.ERROR, TAG, "Unable to hook WeType candidate updates", throwable);
+        }
     }
 
     private synchronized InlineSuggestionsUi ui() {
