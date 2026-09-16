@@ -44,6 +44,8 @@ CI 也可以使用 `SIGNING_KEY`、`KEYSTORE_PASSWORD`、`ALIAS` 和 `KEY_PASSWO
 
 候选栏集成依赖 WeType 内部的 `WxHldService` 和 `ImeCandidateView` 结构。WeType 升级后若建议不再显示，应先重新确认目标类名、getter 和实际 View 层级。
 
+与 [WeType_UI_Enhanced](https://github.com/NEORUAA/WeType_UI_Enhanced) 共存：该模块只调整颜色、透明度和内边距，不增删视图。候选栏背景被调透明后，复制过来的背景不再遮挡原生内容，因此本模块在建议显示期间会显式把被覆盖的原生视图（候选内容与 logo、右侧工具栏图标）置为 `INVISIBLE`（保留布局，不触发重排），恢复时按记录还原原可见性，不会遗留修改过的 visibility。
+
 ## License
 
 [MIT](LICENSE)

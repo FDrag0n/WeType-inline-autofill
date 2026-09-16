@@ -257,9 +257,14 @@ final class InlineSuggestionsUi {
         surfaceParams.topMargin = contentOffset;
         scrollRegion.addView(scrollSurface, surfaceParams);
 
+        List<View> scrollOcclusions = new ArrayList<>();
+        scrollOcclusions.add(candidateContent);
+        scrollOcclusions.add(logo);
+        List<View> pinnedOcclusions = new ArrayList<>();
+        pinnedOcclusions.add(rightContainer);
         state = new State(service, candidate, root, scroll, scrollSurface, scrollContent,
                 scrollRegion, pinnedContent, nativeShell, contentHeight, pinnedWidth,
-                contentOffset);
+                contentOffset, scrollOcclusions, pinnedOcclusions);
         return state;
     }
 
@@ -389,6 +394,7 @@ final class InlineSuggestionsUi {
         if (state.nativeShell && state.pinnedContent.getParent() instanceof ViewGroup) {
             ((ViewGroup) state.pinnedContent.getParent()).removeView(state.pinnedContent);
         }
+        state.restoreNativeContent();
         state = null;
     }
 
@@ -493,6 +499,15 @@ final class InlineSuggestionsUi {
         return scrollable || pinned;
     }
 
+    /**
+     * 外观类模块（如 WeType_UI_Enhanced）会把候选栏背景调成半透明，此时复制过来的背景不再遮挡
+     * 原生内容，建议会和宿主 logo、工具栏图标叠在一起。只处理当前可见的视图，避免把本就隐藏
+     * （或 INVISIBLE/GONE，参与布局）的视图改坏。
+     */
+    static boolean shouldOccludeNativeIcon(boolean present, boolean visible) {
+        return present && visible;
+    }
+
     static boolean candidateActiveAfterUpdate(boolean active, boolean newList,
                                               boolean hasCandidates) {
         return hasCandidates || (active && !newList);
@@ -516,6 +531,10 @@ final class InlineSuggestionsUi {
         final int contentHeight;
         final int pinnedWidth;
         final int contentOffset;
+        final List<View> scrollOcclusions;
+        final List<View> pinnedOcclusions;
+        final List<View> occludedViews = new ArrayList<>();
+        final List<Integer> occludedVisibilities = new ArrayList<>();
         int originalCandidateVisibility;
         int generation;
         boolean showing;
@@ -524,7 +543,8 @@ final class InlineSuggestionsUi {
               HorizontalScrollView scroll, SurfaceView scrollSurface,
               LinearLayout scrollContent, FrameLayout scrollRegion,
               FrameLayout pinnedContent, boolean nativeShell, int contentHeight,
-              int pinnedWidth, int contentOffset) {
+              int pinnedWidth, int contentOffset, List<View> scrollOcclusions,
+              List<View> pinnedOcclusions) {
             this.service = service;
             this.candidate = candidate;
             this.root = root;
@@ -537,6 +557,44 @@ final class InlineSuggestionsUi {
             this.contentHeight = contentHeight;
             this.pinnedWidth = pinnedWidth;
             this.contentOffset = contentOffset;
+            this.scrollOcclusions = scrollOcclusions;
+            this.pinnedOcclusions = pinnedOcclusions;
+        }
+
+        /**
+         * 建议区只覆盖滚动区和右侧槽位，所以按实际显示的区域决定要遮挡哪些原生视图：滚动区下方是
+         * 候选内容（含 logo），右侧槽位下方是工具栏图标。
+         */
+        void occludeNativeContent(boolean showScrollable, boolean showPinned) {
+            if (!nativeShell) {
+                return;
+            }
+            if (showScrollable) {
+                occlude(scrollOcclusions);
+            }
+            if (showPinned) {
+                occlude(pinnedOcclusions);
+            }
+        }
+
+        private void occlude(List<View> views) {
+            for (View view : views) {
+                if (!shouldOccludeNativeIcon(view != null,
+                        view != null && view.getVisibility() == View.VISIBLE)) {
+                    continue;
+                }
+                occludedViews.add(view);
+                occludedVisibilities.add(view.getVisibility());
+                view.setVisibility(View.INVISIBLE);
+            }
+        }
+
+        void restoreNativeContent() {
+            for (int i = 0; i < occludedViews.size(); i++) {
+                occludedViews.get(i).setVisibility(occludedVisibilities.get(i));
+            }
+            occludedViews.clear();
+            occludedVisibilities.clear();
         }
 
         void captureVisibility() {
@@ -548,6 +606,7 @@ final class InlineSuggestionsUi {
             root.setVisibility(View.VISIBLE);
             scrollRegion.setVisibility(showScrollable ? View.VISIBLE : View.INVISIBLE);
             pinnedContent.setVisibility(showPinned ? View.VISIBLE : View.GONE);
+            occludeNativeContent(showScrollable, showPinned);
             showing = true;
         }
 
@@ -567,6 +626,7 @@ final class InlineSuggestionsUi {
             root.setVisibility(View.GONE);
             pinnedContent.setVisibility(View.GONE);
             candidate.setVisibility(originalCandidateVisibility);
+            restoreNativeContent();
             showing = false;
         }
 

@@ -37,4 +37,12 @@ public class InlineSuggestionsUiTest {
         assertTrue(InlineSuggestionsUi.candidateActiveAfterUpdate(true, false, false));
         assertFalse(InlineSuggestionsUi.candidateActiveAfterUpdate(true, true, false));
     }
+
+    @Test
+    public void onlyOccludesPresentAndVisibleNativeIcons() {
+        assertTrue(InlineSuggestionsUi.shouldOccludeNativeIcon(true, true));
+        assertFalse(InlineSuggestionsUi.shouldOccludeNativeIcon(true, false));
+        assertFalse(InlineSuggestionsUi.shouldOccludeNativeIcon(false, true));
+        assertFalse(InlineSuggestionsUi.shouldOccludeNativeIcon(false, false));
+    }
 }
