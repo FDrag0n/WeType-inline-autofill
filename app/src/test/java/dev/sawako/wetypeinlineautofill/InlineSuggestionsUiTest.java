@@ -45,4 +45,21 @@ public class InlineSuggestionsUiTest {
         assertFalse(InlineSuggestionsUi.shouldOccludeNativeIcon(false, true));
         assertFalse(InlineSuggestionsUi.shouldOccludeNativeIcon(false, false));
     }
+
+    @Test
+    public void occludesOnlyNativeChildrenUnderTheOverlay() {
+        // overlay: [0, 40, 100, 80]  (候选栏底部 40px 高)
+        // 完全覆盖、部分覆盖、被覆盖 —— 都算相交
+        assertTrue(InlineSuggestionsUi.intersects(0, 40, 100, 80, 0, 40, 100, 80));
+        assertTrue(InlineSuggestionsUi.intersects(0, 0, 100, 100, 0, 40, 100, 80));
+        assertTrue(InlineSuggestionsUi.intersects(50, 60, 150, 100, 0, 40, 100, 80));
+        // 完全在 overlay 上方 / 下方 / 左右之外 —— 不相交，不该被隐藏
+        assertFalse(InlineSuggestionsUi.intersects(0, 0, 100, 39, 0, 40, 100, 80));
+        assertFalse(InlineSuggestionsUi.intersects(0, 81, 100, 120, 0, 40, 100, 80));
+        assertFalse(InlineSuggestionsUi.intersects(101, 0, 200, 100, 0, 40, 100, 80));
+        // 仅边界相接不算相交
+        assertFalse(InlineSuggestionsUi.intersects(0, 0, 100, 40, 0, 40, 100, 80));
+        // 未布局（退化）矩形不触发遮挡
+        assertFalse(InlineSuggestionsUi.intersects(0, 0, 0, 0, 0, 40, 100, 80));
+    }
 }

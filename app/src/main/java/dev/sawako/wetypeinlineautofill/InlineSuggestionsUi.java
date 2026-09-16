@@ -210,6 +210,8 @@ final class InlineSuggestionsUi {
                     pinnedWidth, ViewGroup.LayoutParams.MATCH_PARENT));
             copyBackground(service, defaultContainer, scrollRegion);
             copyBackground(service, defaultContainer, pinnedContent);
+            // 整行也铺上宿主背景：这样把原生内容整体隐藏后，候选栏不会出现没被绘制的空洞。
+            copyBackground(service, defaultContainer, row);
         } else {
             if (!(candidate.getParent() instanceof LinearLayout)) {
                 return null;
@@ -258,15 +260,10 @@ final class InlineSuggestionsUi {
         surfaceParams.topMargin = contentOffset;
         scrollRegion.addView(scrollSurface, surfaceParams);
 
-        List<View> scrollOcclusions = new ArrayList<>();
-        scrollOcclusions.add(candidateContent);
-        scrollOcclusions.add(logo);
-        List<View> pinnedOcclusions = new ArrayList<>();
-        pinnedOcclusions.add(rightContainer);
         logHierarchy(candidate);
         state = new State(service, candidate, root, scroll, scrollSurface, scrollContent,
-                scrollRegion, pinnedContent, nativeShell, defaultContainer, contentHeight,
-                pinnedWidth, contentOffset, scrollOcclusions, pinnedOcclusions);
+                scrollRegion, pinnedContent, nativeShell, contentHeight, pinnedWidth,
+                contentOffset);
         return state;
     }
 
@@ -510,6 +507,17 @@ final class InlineSuggestionsUi {
         return present && visible;
     }
 
+    /**
+     * 两个矩形是否相交；任一矩形为空（宽或高 &lt;= 0）都视为不相交。退化矩形不绘制，因此不该触发遮挡。
+     */
+    static boolean intersects(int left, int top, int right, int bottom,
+                             int otherLeft, int otherTop, int otherRight, int otherBottom) {
+        if (right <= left || bottom <= top || otherRight <= otherLeft || otherBottom <= otherTop) {
+            return false;
+        }
+        return right > otherLeft && left < otherRight && bottom > otherTop && top < otherBottom;
+    }
+
     static boolean candidateActiveAfterUpdate(boolean active, boolean newList,
                                               boolean hasCandidates) {
         return hasCandidates || (active && !newList);
@@ -588,11 +596,8 @@ final class InlineSuggestionsUi {
         final int contentHeight;
         final int pinnedWidth;
         final int contentOffset;
-        final List<View> scrollOcclusions;
-        final List<View> pinnedOcclusions;
         final List<View> occludedViews = new ArrayList<>();
         final List<Integer> occludedVisibilities = new ArrayList<>();
-        final View nativeShellContent;
         int originalCandidateVisibility;
         int generation;
         boolean showing;
@@ -600,9 +605,8 @@ final class InlineSuggestionsUi {
         State(InputMethodService service, View candidate, FrameLayout root,
               HorizontalScrollView scroll, SurfaceView scrollSurface,
               LinearLayout scrollContent, FrameLayout scrollRegion,
-              FrameLayout pinnedContent, boolean nativeShell, View nativeShellContent,
-              int contentHeight, int pinnedWidth, int contentOffset,
-              List<View> scrollOcclusions, List<View> pinnedOcclusions) {
+              FrameLayout pinnedContent, boolean nativeShell, int contentHeight,
+              int pinnedWidth, int contentOffset) {
             this.service = service;
             this.candidate = candidate;
             this.root = root;
@@ -615,9 +619,6 @@ final class InlineSuggestionsUi {
             this.contentHeight = contentHeight;
             this.pinnedWidth = pinnedWidth;
             this.contentOffset = contentOffset;
-            this.scrollOcclusions = scrollOcclusions;
-            this.pinnedOcclusions = pinnedOcclusions;
-            this.nativeShellContent = nativeShellContent;
         }
 
         /**
@@ -625,42 +626,41 @@ final class InlineSuggestionsUi {
          * 候选内容（含 logo），右侧槽位下方是工具栏图标。
          */
         /**
-         * 建议只在原生候选为空时显示，此时真正可见的是默认态容器（defaultContainer）——logo 与工具栏
-         * 图标都在它的子视图里；候选态容器（candidateContainer 及其 rightContainer）此时是隐藏的。
-         * 只隐藏默认态容器的可见子视图、保留它自身的背景，这样既能消除重叠，又不会让候选栏出现空洞。
+         * 建议显示期间，把候选栏内所有与我们 overlay 相交的可见子视图整体隐藏。
+         *
+         * 之前是「猜哪个容器装着图标」——候选态与默认态容器互斥，猜错就等于什么都没隐藏；而宿主背景
+         * 一旦被外观类模块调成半透明，复制过来的背景也不再遮挡原生内容，于是重叠照旧。这里不再依赖
+         * 具体容器：直接按「当前可见 + 与我们的 overlay 相交」判断，只要图标在候选栏内就一定会被隐藏。
+         * 用 INVISIBLE 保留布局占位、不触发重排；恢复时按记录精确还原原可见性。
          */
-        void occludeNativeContent(boolean showScrollable, boolean showPinned) {
-            if (!nativeShell) {
+        void occludeNativeContent() {
+            if (!nativeShell || !(candidate instanceof ViewGroup)) {
                 return;
             }
-            if (showScrollable) {
-                occlude(scrollOcclusions);
-            }
-            if (showPinned) {
-                occlude(pinnedOcclusions);
-            }
-            if (nativeShellContent instanceof ViewGroup) {
-                ViewGroup group = (ViewGroup) nativeShellContent;
-                for (int i = 0; i < group.getChildCount(); i++) {
-                    occlude(group.getChildAt(i));
+            // root 还没布局时拿不到有效边界，此时不做相交判断：宁可多隐藏，也不能漏掉。
+            boolean rootLaidOut = root.getWidth() > 0 && root.getHeight() > 0;
+            ViewGroup group = (ViewGroup) candidate;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if (child == null || child == root
+                        || !shouldOccludeNativeIcon(true, child.getVisibility() == View.VISIBLE)) {
+                    continue;
                 }
+                if (rootLaidOut && !overlapsRoot(child)) {
+                    continue;
+                }
+                occludedViews.add(child);
+                occludedVisibilities.add(child.getVisibility());
+                child.setVisibility(View.INVISIBLE);
             }
         }
 
-        private void occlude(List<View> views) {
-            for (View view : views) {
-                occlude(view);
-            }
-        }
-
-        private void occlude(View view) {
-            if (view == null || view == candidate || view == root
-                    || !shouldOccludeNativeIcon(true, view.getVisibility() == View.VISIBLE)) {
-                return;
-            }
-            occludedViews.add(view);
-            occludedVisibilities.add(view.getVisibility());
-            view.setVisibility(View.INVISIBLE);
+        /**
+         * root 是 candidate 的直接子视图，两者 left/top 处于同一坐标系，可直接比较。
+         */
+        private boolean overlapsRoot(View child) {
+            return intersects(child.getLeft(), child.getTop(), child.getRight(), child.getBottom(),
+                    root.getLeft(), root.getTop(), root.getRight(), root.getBottom());
         }
 
         void restoreNativeContent() {
@@ -680,7 +680,7 @@ final class InlineSuggestionsUi {
             root.setVisibility(View.VISIBLE);
             scrollRegion.setVisibility(showScrollable ? View.VISIBLE : View.INVISIBLE);
             pinnedContent.setVisibility(showPinned ? View.VISIBLE : View.GONE);
-            occludeNativeContent(showScrollable, showPinned);
+            occludeNativeContent();
             showing = true;
         }
 
