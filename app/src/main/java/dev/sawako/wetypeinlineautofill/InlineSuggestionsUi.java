@@ -39,6 +39,7 @@ final class InlineSuggestionsUi {
             "com.tencent.wetype.plugin.hld.candidate.ImeCandidateView";
     private static final String TAG = "WeTypeInlineAutofill";
     private static final int HEIGHT_DP = 40;
+    private static final int HIERARCHY_MAX_DEPTH = 6;
 
     private State state;
     private boolean candidatesActive;
@@ -262,9 +263,10 @@ final class InlineSuggestionsUi {
         scrollOcclusions.add(logo);
         List<View> pinnedOcclusions = new ArrayList<>();
         pinnedOcclusions.add(rightContainer);
+        logHierarchy(candidate);
         state = new State(service, candidate, root, scroll, scrollSurface, scrollContent,
-                scrollRegion, pinnedContent, nativeShell, contentHeight, pinnedWidth,
-                contentOffset, scrollOcclusions, pinnedOcclusions);
+                scrollRegion, pinnedContent, nativeShell, defaultContainer, contentHeight,
+                pinnedWidth, contentOffset, scrollOcclusions, pinnedOcclusions);
         return state;
     }
 
@@ -517,6 +519,61 @@ final class InlineSuggestionsUi {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
 
+    /**
+     * 诊断用：把候选栏视图树（含可见性与边界）打到 logcat。微信输入法升级或与外观类模块共存后
+     * 层级可能变化，这里只做排查输出，不参与任何逻辑判断（所以读取资源名仅用于阅读，不作为依赖）。
+     */
+    private static void logHierarchy(View root) {
+        StringBuilder builder = new StringBuilder("candidate hierarchy");
+        appendHierarchy(builder, root, 0, HIERARCHY_MAX_DEPTH);
+        String text = builder.toString();
+        int chunkSize = 3500;
+        for (int start = 0; start < text.length(); start += chunkSize) {
+            Log.i(TAG, text.substring(start, Math.min(text.length(), start + chunkSize)));
+        }
+    }
+
+    private static void appendHierarchy(StringBuilder out, View view, int depth, int maxDepth) {
+        if (view == null || depth > maxDepth) {
+            return;
+        }
+        out.append('\n');
+        for (int i = 0; i < depth; i++) {
+            out.append("  ");
+        }
+        out.append(view.getClass().getName())
+                .append(" id=").append(describeId(view))
+                .append(" vis=").append(describeVisibility(view.getVisibility()))
+                .append(" [").append(view.getLeft()).append(',').append(view.getTop())
+                .append(',').append(view.getRight()).append(',').append(view.getBottom())
+                .append(']');
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                appendHierarchy(out, group.getChildAt(i), depth + 1, maxDepth);
+            }
+        }
+    }
+
+    private static String describeId(View view) {
+        int id = view.getId();
+        if (id == View.NO_ID) {
+            return "-";
+        }
+        try {
+            return view.getResources().getResourceEntryName(id);
+        } catch (Throwable ignored) {
+            return Integer.toString(id);
+        }
+    }
+
+    private static String describeVisibility(int visibility) {
+        if (visibility == View.VISIBLE) {
+            return "V";
+        }
+        return visibility == View.INVISIBLE ? "I" : "G";
+    }
+
     private static final class State {
         final InputMethodService service;
         final View candidate;
@@ -535,6 +592,7 @@ final class InlineSuggestionsUi {
         final List<View> pinnedOcclusions;
         final List<View> occludedViews = new ArrayList<>();
         final List<Integer> occludedVisibilities = new ArrayList<>();
+        final View nativeShellContent;
         int originalCandidateVisibility;
         int generation;
         boolean showing;
@@ -542,9 +600,9 @@ final class InlineSuggestionsUi {
         State(InputMethodService service, View candidate, FrameLayout root,
               HorizontalScrollView scroll, SurfaceView scrollSurface,
               LinearLayout scrollContent, FrameLayout scrollRegion,
-              FrameLayout pinnedContent, boolean nativeShell, int contentHeight,
-              int pinnedWidth, int contentOffset, List<View> scrollOcclusions,
-              List<View> pinnedOcclusions) {
+              FrameLayout pinnedContent, boolean nativeShell, View nativeShellContent,
+              int contentHeight, int pinnedWidth, int contentOffset,
+              List<View> scrollOcclusions, List<View> pinnedOcclusions) {
             this.service = service;
             this.candidate = candidate;
             this.root = root;
@@ -559,11 +617,17 @@ final class InlineSuggestionsUi {
             this.contentOffset = contentOffset;
             this.scrollOcclusions = scrollOcclusions;
             this.pinnedOcclusions = pinnedOcclusions;
+            this.nativeShellContent = nativeShellContent;
         }
 
         /**
          * 建议区只覆盖滚动区和右侧槽位，所以按实际显示的区域决定要遮挡哪些原生视图：滚动区下方是
          * 候选内容（含 logo），右侧槽位下方是工具栏图标。
+         */
+        /**
+         * 建议只在原生候选为空时显示，此时真正可见的是默认态容器（defaultContainer）——logo 与工具栏
+         * 图标都在它的子视图里；候选态容器（candidateContainer 及其 rightContainer）此时是隐藏的。
+         * 只隐藏默认态容器的可见子视图、保留它自身的背景，这样既能消除重叠，又不会让候选栏出现空洞。
          */
         void occludeNativeContent(boolean showScrollable, boolean showPinned) {
             if (!nativeShell) {
@@ -575,18 +639,28 @@ final class InlineSuggestionsUi {
             if (showPinned) {
                 occlude(pinnedOcclusions);
             }
+            if (nativeShellContent instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) nativeShellContent;
+                for (int i = 0; i < group.getChildCount(); i++) {
+                    occlude(group.getChildAt(i));
+                }
+            }
         }
 
         private void occlude(List<View> views) {
             for (View view : views) {
-                if (!shouldOccludeNativeIcon(view != null,
-                        view != null && view.getVisibility() == View.VISIBLE)) {
-                    continue;
-                }
-                occludedViews.add(view);
-                occludedVisibilities.add(view.getVisibility());
-                view.setVisibility(View.INVISIBLE);
+                occlude(view);
             }
+        }
+
+        private void occlude(View view) {
+            if (view == null || view == candidate || view == root
+                    || !shouldOccludeNativeIcon(true, view.getVisibility() == View.VISIBLE)) {
+                return;
+            }
+            occludedViews.add(view);
+            occludedVisibilities.add(view.getVisibility());
+            view.setVisibility(View.INVISIBLE);
         }
 
         void restoreNativeContent() {
