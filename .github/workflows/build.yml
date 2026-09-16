@@ -39,8 +39,21 @@ jobs:
           java-version: 21
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+      # GitHub 托管的 runner 已预装 Android SDK（ANDROID_SDK_ROOT 指向 /usr/local/lib/android/sdk），
+      # 因此不使用 android-actions/setup-android：它会安装已被 Google 移除的旧版 `tools` 包，
+      # 报 "Failed to find package 'tools'" 后 exit code 1，导致 job 直接失败。
+      # 这里只做防御性补齐：接受许可并确保 compileSdk 需要的平台与构建工具存在，
+      # 缺失或不支持时留空给 Gradle 自行 provision，不让该步骤成为硬失败点。
+      - name: Prepare Android SDK
+        run: |
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          sdkmanager="$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -1)"
+          if [ -z "$sdkmanager" ]; then
+            echo "sdkmanager not found; letting Gradle provision the SDK"
+            exit 0
+          fi
+          yes | "$sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" || true
 
       - name: Decode signing keystore
         if: env.SIGNING_KEY_B64 != ''
